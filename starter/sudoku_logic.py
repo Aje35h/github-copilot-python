@@ -11,13 +11,15 @@ EMPTY = 0
 # exist, but this generator cannot produce them dependably.
 MIN_CLUES = 25
 MAX_CLUES = SIZE * SIZE
-DEFAULT_CLUE_COUNT = 35
 MAX_GENERATION_ATTEMPTS = 20
 DIFFICULTY_CLUE_COUNTS = {
     "easy": 40,
     "medium": 32,
     "hard": 28,
 }
+DEFAULT_DIFFICULTY = "medium"
+CUSTOM_DIFFICULTY = "custom"
+DEFAULT_CLUE_COUNT = DIFFICULTY_CLUE_COUNTS[DEFAULT_DIFFICULTY]
 
 Board = list[list[int]]
 
@@ -91,27 +93,40 @@ def validate_clue_count(clues: int) -> None:
         raise ValueError(f"clues must be between {MIN_CLUES} and {MAX_CLUES}.")
 
 
-def parse_clue_count(difficulty: str | None, clues: str | None) -> int:
-    """Resolve request text into a clue count.
+def parse_game_settings(
+    difficulty: str | None, clues: str | None
+) -> tuple[str, int]:
+    """Resolve request text into a ``(difficulty, clue_count)`` pair.
 
-    A difficulty takes precedence over an explicit clue count; when neither is
-    supplied the legacy default of 35 clues is used. Raises ``ValueError`` for
-    an unknown difficulty or an invalid clue count.
+    A difficulty takes precedence over an explicit clue count, which is
+    reported as the ``"custom"`` difficulty. When neither is supplied the
+    Medium difficulty is used. Raises ``ValueError`` for an unknown
+    difficulty or an invalid clue count.
     """
     if difficulty is not None:
-        return clue_count_for_difficulty(difficulty)
+        name = difficulty.strip().lower()
+        return name, clue_count_for_difficulty(name)
     if clues is None:
-        return DEFAULT_CLUE_COUNT
+        return DEFAULT_DIFFICULTY, DEFAULT_CLUE_COUNT
     try:
         clue_count = int(clues)
     except ValueError:
         raise ValueError("clues must be a whole number.") from None
     validate_clue_count(clue_count)
-    return clue_count
+    return CUSTOM_DIFFICULTY, clue_count
+
+
+def parse_clue_count(difficulty: str | None, clues: str | None) -> int:
+    """Resolve request text into a clue count; see ``parse_game_settings``."""
+    return parse_game_settings(difficulty, clues)[1]
 
 
 def _validate_board_shape(board: Board) -> None:
-    if len(board) != SIZE or any(len(row) != SIZE for row in board):
+    if (
+        not isinstance(board, list)
+        or len(board) != SIZE
+        or any(not isinstance(row, list) or len(row) != SIZE for row in board)
+    ):
         raise ValueError("board must be a 9x9 grid.")
     for row in board:
         for value in row:
@@ -269,3 +284,71 @@ def generate_puzzle(
     raise RuntimeError(
         f"Could not generate a uniquely solvable puzzle with {clues} clues."
     )
+
+
+def validate_board(board: Board) -> None:
+    """Raise ``ValueError`` unless ``board`` is a 9x9 grid of integers 0-9."""
+    _validate_board_shape(board)
+
+
+def _count_clues(board: Board) -> int:
+    return sum(value != EMPTY for row in board for value in row)
+
+
+def solve_validated_game(puzzle: Board, board: Board) -> Board:
+    """Validate a submitted game and return the puzzle's unique solution.
+
+    Checks that both grids are well formed, that the puzzle has an accepted
+    clue count and exactly one solution, and that ``board`` keeps every
+    prefilled puzzle value. The solution is derived only from ``puzzle``.
+    Raises ``ValueError`` describing the first problem found.
+    """
+    validate_board(puzzle)
+    validate_board(board)
+    if not MIN_CLUES <= _count_clues(puzzle) <= MAX_CLUES:
+        raise ValueError(
+            f"puzzle must have between {MIN_CLUES} and {MAX_CLUES} clues."
+        )
+    for row in range(SIZE):
+        for col in range(SIZE):
+            given = puzzle[row][col]
+            if given != EMPTY and board[row][col] != given:
+                raise ValueError("board must keep every prefilled puzzle value.")
+    if count_solutions(puzzle, limit=2) != 1:
+        raise ValueError("puzzle must have exactly one solution.")
+    solution = solve_board(puzzle)
+    if solution is None:
+        raise ValueError("puzzle must have exactly one solution.")
+    return solution
+
+
+def find_incorrect_cells(board: Board, solution: Board) -> list[list[int]]:
+    """Return ``[row, col]`` for each filled cell that differs from the solution.
+
+    Empty cells are never reported as incorrect.
+    """
+    return [
+        [row, col]
+        for row in range(SIZE)
+        for col in range(SIZE)
+        if board[row][col] != EMPTY and board[row][col] != solution[row][col]
+    ]
+
+
+def is_board_complete(board: Board, incorrect_cells: list[list[int]]) -> bool:
+    """Return ``True`` when no cell is empty and no cell is incorrect."""
+    return not incorrect_cells and all(
+        value != EMPTY for row in board for value in row
+    )
+
+
+def find_hint(board: Board, solution: Board) -> tuple[int, int, int] | None:
+    """Return ``(row, col, value)`` for the first empty cell, row by row.
+
+    Returns ``None`` when ``board`` has no empty cell.
+    """
+    for row in range(SIZE):
+        for col in range(SIZE):
+            if board[row][col] == EMPTY:
+                return row, col, solution[row][col]
+    return None

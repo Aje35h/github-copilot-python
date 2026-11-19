@@ -41,11 +41,36 @@ h1 {
 .sudoku-cell.prefilled {
     background: #e0e0e0;
     font-weight: bold;
-    color: #333;
+    color: #212121;
+}
+
+/* Hinted cells: bold and underlined, so they differ from givens without color. */
+.sudoku-cell.hinted {
+    background: #e3f2fd;
+    font-weight: bold;
+    text-decoration: underline;
+    color: #0d47a1;
+}
+
+/* Conflicts: diagonal stripes; incorrect values: thick inset frame.
+   Both use paint-only properties so cells never change size. */
+.sudoku-cell.conflict {
+    color: #b71c1c;
+    background-image: repeating-linear-gradient(
+        45deg,
+        rgba(183, 28, 28, 0.18) 0 4px,
+        transparent 4px 8px
+    );
 }
 
 .sudoku-cell.incorrect {
-    background: #ffcdd2;
+    background-color: #ffcdd2;
+    box-shadow: inset 0 0 0 3px #b71c1c;
+}
+
+.sudoku-cell:focus-visible {
+    outline: 3px solid #0d47a1;
+    outline-offset: -3px;
 }
 
 .sudoku-cell:nth-child(3),
@@ -78,8 +103,34 @@ button:hover {
     background: #1565c0;
 }
 
-#message {
-    margin-left: 20px;
+button:focus-visible,
+select:focus-visible {
+    outline: 3px solid #0d47a1;
+    outline-offset: 2px;
+}
+
+.controls label {
     font-size: 16px;
-    color: #d32f2f;
+    margin-right: 4px;
+}
+
+.controls select {
+    font-size: 16px;
+    padding: 6px;
+}
+
+#message {
+    min-height: 1.5em;
+    margin: 0 auto 30px;
+    font-size: 16px;
+    color: #212121;
+}
+
+#message[data-tone="error"] {
+    color: #b71c1c;
+}
+
+#message[data-tone="success"] {
+    color: #1b5e20;
+    font-weight: bold;
 }

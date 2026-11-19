@@ -1,18 +1,28 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sudoku Game</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <h1>Sudoku Game</h1>
-  <div id="sudoku-board"></div>
-  <div class="controls">
-    <button id="new-game">New Game</button>
-    <button id="check-solution">Check Solution</button>
-    <span id="message"></span>
-  </div>
-  <script src="/static/main.js"></script>
+  <main>
+    <h1>Sudoku Game</h1>
+    <div id="sudoku-board" role="group" aria-label="Sudoku board"></div>
+    <div class="controls">
+      <label for="difficulty">Difficulty</label>
+      <select id="difficulty" name="difficulty">
+        <option value="easy">Easy</option>
+        <option value="medium" selected>Medium</option>
+        <option value="hard">Hard</option>
+      </select>
+      <button type="button" id="new-game">New Game</button>
+      <button type="button" id="check-solution">Check Solution</button>
+      <button type="button" id="hint">Hint</button>
+    </div>
+    <p id="message" role="status" aria-live="polite"></p>
+  </main>
+  <script type="module" src="/static/main.js"></script>
 </body>
 </html>

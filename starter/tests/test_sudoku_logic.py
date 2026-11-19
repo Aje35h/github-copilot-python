@@ -175,7 +175,7 @@ def test_clue_count_for_difficulty_rejects_unknown_names(difficulty):
 @pytest.mark.parametrize(
     ("difficulty", "clues", "expected_clues"),
     [
-        (None, None, 35),
+        (None, None, 32),
         (None, "25", 25),
         (None, "81", 81),
         ("medium", None, 32),
@@ -317,3 +317,104 @@ def test_generate_puzzle_raises_after_bounded_failed_attempts(monkeypatch):
     with pytest.raises(RuntimeError):
         sudoku_logic.generate_puzzle(28, rng=random.Random(1))
     assert len(attempts) == sudoku_logic.MAX_GENERATION_ATTEMPTS
+
+
+@pytest.mark.parametrize(
+    ("difficulty", "clues", "expected_settings"),
+    [
+        (None, None, ("medium", 32)),
+        ("easy", None, ("easy", 40)),
+        (" Hard ", None, ("hard", 28)),
+        (None, "42", ("custom", 42)),
+        ("medium", "50", ("medium", 32)),
+    ],
+)
+def test_parse_game_settings_returns_difficulty_and_clue_count(
+    difficulty, clues, expected_settings
+):
+    assert sudoku_logic.parse_game_settings(difficulty, clues) == expected_settings
+
+
+@pytest.mark.parametrize(
+    "board",
+    [
+        None,
+        "530070000",
+        [[0] * 9] * 8,
+        [[0] * 9] * 8 + ["000000000"],
+        [[0] * 8] + [[0] * 9] * 8,
+        [[True] + [0] * 8] + [[0] * 9] * 8,
+        [["5"] + [0] * 8] + [[0] * 9] * 8,
+        [[4.0] + [0] * 8] + [[0] * 9] * 8,
+    ],
+)
+def test_validate_board_rejects_malformed_boards(board):
+    with pytest.raises(ValueError, match="board"):
+        sudoku_logic.validate_board(board)
+
+
+def test_solve_validated_game_returns_solution_for_partial_board():
+    board = [row[:] for row in UNIQUE_PUZZLE]
+    board[0][2] = 9
+
+    assert (
+        sudoku_logic.solve_validated_game(UNIQUE_PUZZLE, board)
+        == UNIQUE_PUZZLE_SOLUTION
+    )
+
+
+def _with_cell(board, row, column, value):
+    changed = [line[:] for line in board]
+    changed[row][column] = value
+    return changed
+
+
+@pytest.mark.parametrize(
+    ("puzzle", "board", "message"),
+    [
+        (UNIQUE_PUZZLE, _with_cell(UNIQUE_PUZZLE, 0, 0, 1), "prefilled"),
+        (UNIQUE_PUZZLE, _with_cell(UNIQUE_PUZZLE, 0, 0, 0), "prefilled"),
+        (
+            _with_cell(UNIQUE_PUZZLE, 0, 2, 5),
+            _with_cell(UNIQUE_PUZZLE, 0, 2, 5),
+            "exactly one solution",
+        ),
+        (_two_solution_board(), _two_solution_board(), "exactly one solution"),
+        (_conflicting_board(), _conflicting_board(), "clues"),
+    ],
+)
+def test_solve_validated_game_rejects_tampered_or_invalid_games(
+    puzzle, board, message
+):
+    with pytest.raises(ValueError, match=message):
+        sudoku_logic.solve_validated_game(puzzle, board)
+
+
+def test_find_incorrect_cells_ignores_empty_cells():
+    board = [row[:] for row in UNIQUE_PUZZLE]
+    board[0][2] = UNIQUE_PUZZLE_SOLUTION[0][2]
+    board[0][3] = 1
+
+    assert sudoku_logic.find_incorrect_cells(board, UNIQUE_PUZZLE_SOLUTION) == [
+        [0, 3]
+    ]
+
+
+def test_is_board_complete_requires_full_correct_board():
+    wrong = _with_cell(UNIQUE_PUZZLE_SOLUTION, 0, 0, 1)
+
+    assert sudoku_logic.is_board_complete(UNIQUE_PUZZLE_SOLUTION, [])
+    assert not sudoku_logic.is_board_complete(UNIQUE_PUZZLE, [])
+    assert not sudoku_logic.is_board_complete(wrong, [[0, 0]])
+
+
+def test_find_hint_returns_first_empty_cell_or_none():
+    assert sudoku_logic.find_hint(UNIQUE_PUZZLE, UNIQUE_PUZZLE_SOLUTION) == (
+        0,
+        2,
+        UNIQUE_PUZZLE_SOLUTION[0][2],
+    )
+    assert (
+        sudoku_logic.find_hint(UNIQUE_PUZZLE_SOLUTION, UNIQUE_PUZZLE_SOLUTION)
+        is None
+    )
