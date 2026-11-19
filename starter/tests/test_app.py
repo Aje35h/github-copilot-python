@@ -50,7 +50,14 @@ def test_index_renders_game_page(client):
 
 @pytest.mark.parametrize(
     ("query_string", "expected_clues"),
-    [("", 35), ("?clues=42", 42)],
+    [
+        ("", 35),
+        ("?clues=42", 42),
+        ("?difficulty=easy", 40),
+        ("?difficulty=medium", 32),
+        ("?difficulty=hard", 28),
+        ("?difficulty=easy&clues=50", 40),
+    ],
 )
 def test_new_game_returns_puzzle_and_stores_game(
     client, monkeypatch, query_string, expected_clues
@@ -71,6 +78,53 @@ def test_new_game_returns_puzzle_and_stores_game(
     assert response.get_json() == {"puzzle": PUZZLE}
     assert received_clues == [expected_clues]
     assert sudoku_app.CURRENT == {"puzzle": PUZZLE, "solution": SOLUTION}
+
+
+@pytest.mark.parametrize(
+    "query_string",
+    [
+        "?difficulty=expert",
+        "?difficulty=",
+        "?clues=abc",
+        "?clues=",
+        "?clues=17",
+        "?clues=24",
+        "?clues=82",
+    ],
+)
+def test_new_game_rejects_invalid_input_without_generating(
+    client, monkeypatch, query_string
+):
+    def generate_puzzle(clues):
+        raise AssertionError("generate_puzzle should not be called")
+
+    monkeypatch.setattr(
+        sudoku_app.sudoku_logic, "generate_puzzle", generate_puzzle
+    )
+
+    response = client.get(f"/new{query_string}")
+
+    assert response.status_code == 400
+    assert response.is_json
+    assert set(response.get_json()) == {"error"}
+    assert sudoku_app.CURRENT == {"puzzle": None, "solution": None}
+
+
+def test_new_game_reports_generation_failure_as_json(client, monkeypatch):
+    def generate_puzzle(clues):
+        raise RuntimeError("internal detail")
+
+    monkeypatch.setattr(
+        sudoku_app.sudoku_logic, "generate_puzzle", generate_puzzle
+    )
+
+    response = client.get("/new?difficulty=hard")
+
+    assert response.status_code == 500
+    assert response.get_json() == {
+        "error": "Could not generate a puzzle. Please try again."
+    }
+    assert sudoku_app.CURRENT == {"puzzle": None, "solution": None}
 
 
 def test_check_without_game_returns_client_error(client):
