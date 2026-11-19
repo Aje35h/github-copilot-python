@@ -39,6 +39,51 @@ be checked; start a new game instead. Never commit a real key.
 - Invalid or tampered requests return HTTP 400 JSON; Hint returns 409 when no
   empty cell remains.
 
+## Timer, player name, and Top 10 scoreboard
+
+These features run only in the browser; the server is unchanged.
+
+- The timer starts after a valid new puzzle loads, resets for each new game,
+  and stops when the puzzle is solved. Time is ranked in whole seconds and
+  shown as MM:SS (minutes keep counting past 60).
+- The hints counter goes up only after a successful hint response.
+- After a puzzle is solved, every cell becomes read-only and Check and Hint
+  only report that the puzzle is already solved. Each game is recorded at
+  most once.
+- Games of 86,400 seconds (24 hours) or longer are not recorded.
+
+### Browser storage
+
+| Key | Value |
+|---|---|
+| `sudoku.playerName.v1` | The trimmed player name as plain text (1–30 characters, no control characters). Removed when the field is cleared. `Anonymous` is used for an empty name but never stored here. |
+| `sudoku.scoreboard.v1` | `{"version":1,"scores":[...]}` with at most 10 scores |
+
+Each score has exactly these fields: `name`, `seconds` (0–86,399), `difficulty`
+(`easy`, `medium`, or `hard`), `hintsUsed` (0–81), and `completedAt` (epoch
+milliseconds). The puzzle, board, solution, and signed token are never stored.
+
+Scores are sorted by `seconds`, then fewer `hintsUsed`, then earlier
+`completedAt`, then `name` by character code, so the order is the same in every
+browser. Only the 10 fastest are kept.
+
+Stored data is treated as untrusted. Values that are missing, over 8,192
+characters, not JSON, or a different version are ignored. Invalid entries are
+dropped, valid ones are rebuilt from the allowed fields only, and names are
+displayed as text, never as HTML. Loading never rewrites storage; the next
+recorded score replaces bad data.
+
+### Several tabs
+
+When the browser supports the Web Locks API, a score is recorded inside a lock
+named `sudoku.scoreboard.v1`, which re-reads, inserts, and saves in one step.
+Without Web Locks, the score is recorded without the lock: if two tabs finish
+at the same moment, one of the two scores can be lost. Other open tabs update
+their table when the scoreboard changes.
+
+Scores live in the player's own browser and can be edited with developer
+tools; they are not tamper-proof.
+
 ## Running the tests
 
 Python tests (pytest):
@@ -50,8 +95,11 @@ python -m pytest -q
 JavaScript helper tests (Node.js 18 or newer, no npm packages needed):
 
 ```powershell
-node --test tests\js\sudoku_rules.test.js
+node --test tests\js\sudoku_rules.test.js tests\js\game_timer.test.js tests\js\player_name.test.js tests\js\scoreboard.test.js
 ```
+
+Node 22 does not accept the `tests\js\` folder here, so list each file.
+`npm test` runs the same command.
 
 ## Manual browser checks
 
@@ -69,3 +117,17 @@ frontend, check that:
 7. Filling the board correctly shows the completion message.
 8. A screen reader announces status messages and each cell's row, column, and
    state.
+9. The timer starts at 00:00 when a puzzle loads, counts up, resets on New
+   Game, and stops when the puzzle is solved.
+10. Hints used goes up only after a successful hint and resets on New Game.
+11. After solving, every cell is read-only; clicking Check again shows
+    "already solved" and adds no second score.
+12. The completion message gives the time, hints, and Top 10 rank.
+13. The player name and the Top 10 survive a page refresh and a browser
+    restart; clearing the name records the next score as Anonymous.
+14. Corrupt `sudoku.scoreboard.v1` data in developer tools shows an empty
+    table without errors.
+15. Two tabs that each finish a game both appear in the Top 10, and each
+    tab's table updates when the other records a score.
+16. At 320 px wide, the scoreboard can be scrolled sideways, including with
+    the keyboard after focusing it.

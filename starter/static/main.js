@@ -20,6 +20,25 @@ import {
   isValidNewGameResponse,
   parseCellValue,
 } from './sudoku_rules.js';
+import {
+  createTimer,
+  formatElapsed,
+  getElapsedSeconds,
+  stopTimer,
+  toIsoDuration,
+} from './game_timer.js';
+import { loadPlayerName, resolvePlayerName, savePlayerName } from './player_name.js';
+import {
+  SCOREBOARD_KEY,
+  formatCompletionMessage,
+  formatDifficulty,
+  isRecordableSeconds,
+  loadScores,
+  recordScore,
+} from './scoreboard.js';
+
+const TIMER_REFRESH_MS = 250;
+const ALREADY_SOLVED_MESSAGE = 'This puzzle is already solved. Start a new game to play again.';
 
 const state = {
   puzzle: null,
@@ -32,10 +51,15 @@ const state = {
   conflictCells: new Set(),
   hintsUsed: 0,
   busy: false,
+  gameId: 0,
+  completed: false,
+  timer: null,
 };
 
 let elements = null;
 let cellInputs = [];
+let timerIntervalId = null;
+let shownSeconds = null;
 
 function selectElements() {
   return {
@@ -45,13 +69,133 @@ function selectElements() {
     check: document.getElementById('check-solution'),
     hint: document.getElementById('hint'),
     message: document.getElementById('message'),
+    playerName: document.getElementById('player-name'),
+    timer: document.getElementById('timer'),
+    hintsUsed: document.getElementById('hints-used'),
+    scoreboardBody: document.getElementById('scoreboard-body'),
   };
+}
+
+/** Return localStorage, or null when the browser blocks access to it. */
+function getStorage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 function setStatus(text, tone = 'info') {
   elements.message.textContent = text;
   elements.message.dataset.tone = tone;
 }
+
+// ---- Timer and hints display ----
+
+function renderTimer() {
+  const seconds = state.timer ? getElapsedSeconds(state.timer, performance.now()) : 0;
+  if (seconds === shownSeconds) {
+    return;
+  }
+  shownSeconds = seconds;
+  elements.timer.textContent = formatElapsed(seconds);
+  elements.timer.dateTime = toIsoDuration(seconds);
+}
+
+function stopTimerDisplay() {
+  if (timerIntervalId !== null) {
+    clearInterval(timerIntervalId);
+    timerIntervalId = null;
+  }
+}
+
+function startTimerDisplay() {
+  stopTimerDisplay();
+  shownSeconds = null;
+  renderTimer();
+  timerIntervalId = setInterval(renderTimer, TIMER_REFRESH_MS);
+}
+
+function renderHintsUsed() {
+  elements.hintsUsed.textContent = String(state.hintsUsed);
+}
+
+// ---- Scoreboard display ----
+
+function createCell(tag, text) {
+  const cell = document.createElement(tag);
+  cell.textContent = text;
+  return cell;
+}
+
+function createScoreRow(score, index) {
+  const row = document.createElement('tr');
+  const rank = createCell('th', String(index + 1));
+  rank.scope = 'row';
+  const time = document.createElement('time');
+  time.dateTime = toIsoDuration(score.seconds);
+  time.textContent = formatElapsed(score.seconds);
+  const timeCell = document.createElement('td');
+  timeCell.appendChild(time);
+  row.append(
+    rank,
+    createCell('td', score.name),
+    timeCell,
+    createCell('td', formatDifficulty(score.difficulty)),
+    createCell('td', String(score.hintsUsed))
+  );
+  return row;
+}
+
+function createMessageRow(text) {
+  const row = document.createElement('tr');
+  const cell = createCell('td', text);
+  cell.colSpan = 5;
+  row.appendChild(cell);
+  return row;
+}
+
+function renderScoreboard({ scores, available }) {
+  let rows;
+  if (!available) {
+    rows = [createMessageRow('Scores are unavailable because browser storage is blocked.')];
+  } else if (scores.length === 0) {
+    rows = [createMessageRow('No scores yet.')];
+  } else {
+    rows = scores.map(createScoreRow);
+  }
+  elements.scoreboardBody.replaceChildren(...rows);
+}
+
+function refreshScoreboard() {
+  renderScoreboard(loadScores(getStorage()));
+}
+
+/** Record a score while holding a cross-tab lock when the browser supports it. */
+async function recordScoreSafely(score) {
+  const record = () => recordScore(getStorage(), score);
+  if (navigator.locks && typeof navigator.locks.request === 'function') {
+    try {
+      return await navigator.locks.request(SCOREBOARD_KEY, record);
+    } catch {
+      // Documented fallback: record without the lock.
+    }
+  }
+  return record();
+}
+
+// ---- Player name ----
+
+function handlePlayerNameInput() {
+  const result = savePlayerName(getStorage(), elements.playerName.value);
+  if (result === 'invalid') {
+    elements.playerName.setAttribute('aria-invalid', 'true');
+  } else {
+    elements.playerName.removeAttribute('aria-invalid');
+  }
+}
+
+// ---- Board ----
 
 function cellKind(key) {
   if (state.hintedCells.has(key)) {
@@ -67,7 +211,7 @@ function renderCell(row, col) {
   const kind = cellKind(key);
   const conflict = state.conflictCells.has(key);
   const incorrect = state.incorrectCells.has(key);
-  const locked = kind !== 'editable';
+  const locked = kind !== 'editable' || state.completed;
 
   input.value = value === EMPTY ? '' : String(value);
   input.readOnly = locked;
@@ -135,7 +279,7 @@ function isReadyToAutoCheck() {
 
 function handleCellInput(row, col) {
   const key = cellKey(row, col);
-  if (state.lockedCells.has(key)) {
+  if (state.completed || state.lockedCells.has(key)) {
     renderCell(row, col);
     return;
   }
@@ -159,6 +303,8 @@ function handleCellInput(row, col) {
     setStatus('');
   }
 }
+
+// ---- Server requests ----
 
 async function requestJson(url, options) {
   let response;
@@ -208,6 +354,8 @@ async function runExclusive(task) {
   }
 }
 
+// ---- Game flow ----
+
 function startGame({ puzzle, difficulty, token }) {
   state.puzzle = copyBoard(puzzle);
   state.board = copyBoard(puzzle);
@@ -218,8 +366,13 @@ function startGame({ puzzle, difficulty, token }) {
   state.incorrectCells = new Set();
   state.conflictCells = new Set();
   state.hintsUsed = 0;
+  state.gameId += 1;
+  state.completed = false;
+  state.timer = createTimer(performance.now());
   buildBoard();
   renderAllCells();
+  renderHintsUsed();
+  startTimerDisplay();
 }
 
 async function newGame() {
@@ -228,6 +381,7 @@ async function newGame() {
   setStatus(`Loading a new ${difficulty} puzzle.`);
   const result = await requestJson(`/new?difficulty=${encodeURIComponent(difficulty)}`);
   if (!result.ok || !isValidNewGameResponse(result.data)) {
+    // The current game and its timer keep running.
     setStatus(errorMessage(result, 'Could not start a new game. Please try again.'), 'error');
     return;
   }
@@ -235,20 +389,64 @@ async function newGame() {
   setStatus(`New ${state.difficulty} puzzle ready. ${countEmptyCells(state.board)} cells to fill.`);
 }
 
-function hasGame() {
-  if (state.token) {
-    return true;
+function canPlay() {
+  if (!state.token) {
+    setStatus('Start a new game first.', 'error');
+    return false;
   }
-  setStatus('Start a new game first.', 'error');
-  return false;
+  if (state.completed) {
+    setStatus(ALREADY_SOLVED_MESSAGE);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Stop the timer, lock the board, and record the score exactly once.
+ * The completed flag is set before any await so repeated checks cannot
+ * record the same game twice.
+ */
+async function finishGame(submittedAtMs) {
+  if (state.completed) {
+    return;
+  }
+  state.completed = true;
+  state.timer = stopTimer(state.timer, submittedAtMs);
+  stopTimerDisplay();
+  renderTimer();
+  renderAllCells();
+
+  const seconds = getElapsedSeconds(state.timer, submittedAtMs);
+  const hintsUsed = state.hintsUsed;
+  let outcome;
+  if (isRecordableSeconds(seconds)) {
+    outcome = await recordScoreSafely({
+      name: resolvePlayerName(elements.playerName.value),
+      seconds,
+      difficulty: state.difficulty,
+      hintsUsed,
+      completedAt: Date.now(),
+    });
+    if (outcome.status === 'saved' || outcome.status === 'not-ranked') {
+      renderScoreboard({ scores: outcome.scores, available: true });
+    }
+  } else {
+    outcome = { status: 'too-long', rank: null };
+  }
+  setStatus(formatCompletionMessage({ seconds, hintsUsed, ...outcome }), 'success');
 }
 
 async function performCheck() {
-  if (!hasGame()) {
+  if (!canPlay()) {
     return;
   }
+  const gameId = state.gameId;
   const submitted = copyBoard(state.board);
+  const submittedAtMs = performance.now();
   const result = await postGame('/check', submitted);
+  if (gameId !== state.gameId) {
+    return;
+  }
   if (!result.ok || !isValidCheckResponse(result.data)) {
     setStatus(errorMessage(result, 'Could not check the puzzle. Please try again.'), 'error');
     return;
@@ -262,20 +460,27 @@ async function performCheck() {
 
   const complete = result.data.complete && countEmptyCells(state.board) === 0
     && state.board.every((row, rowIndex) => row.every((value, col) => value === submitted[rowIndex][col]));
+  if (complete) {
+    await finishGame(submittedAtMs);
+    return;
+  }
   const message = formatCheckMessage({
     incorrectCount: state.incorrectCells.size,
-    complete,
+    complete: false,
     emptyCount: countEmptyCells(state.board),
   });
-  const tone = complete ? 'success' : state.incorrectCells.size > 0 ? 'error' : 'info';
-  setStatus(message, tone);
+  setStatus(message, state.incorrectCells.size > 0 ? 'error' : 'info');
 }
 
 async function performHint() {
-  if (!hasGame()) {
+  if (!canPlay()) {
     return;
   }
+  const gameId = state.gameId;
   const result = await postGame('/hint', copyBoard(state.board));
+  if (gameId !== state.gameId) {
+    return;
+  }
   if (!result.ok || !isValidHintResponse(result.data, state.lockedCells)) {
     setStatus(errorMessage(result, 'Could not get a hint. Please try again.'), 'error');
     return;
@@ -288,6 +493,7 @@ async function performHint() {
   state.hintedCells.add(key);
   state.incorrectCells.delete(key);
   state.hintsUsed += 1;
+  renderHintsUsed();
   refreshConflicts();
   setStatus(`Hint: row ${row + 1}, column ${col + 1} is ${value}. Hints used: ${state.hintsUsed}.`);
   if (isReadyToAutoCheck()) {
@@ -297,9 +503,18 @@ async function performHint() {
 
 function init() {
   elements = selectElements();
+  elements.playerName.value = loadPlayerName(getStorage()) ?? '';
+  elements.playerName.addEventListener('input', handlePlayerNameInput);
   elements.newGame.addEventListener('click', () => runExclusive(newGame));
   elements.check.addEventListener('click', () => runExclusive(performCheck));
   elements.hint.addEventListener('click', () => runExclusive(performHint));
+  // Keep the table current when another tab records a score.
+  window.addEventListener('storage', (event) => {
+    if (event.key === SCOREBOARD_KEY || event.key === null) {
+      refreshScoreboard();
+    }
+  });
+  refreshScoreboard();
   runExclusive(newGame);
 }
 

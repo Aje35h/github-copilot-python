@@ -95,7 +95,35 @@ def test_index_has_accessible_game_controls(client):
     assert '<script type="module" src="/static/main.js">' in html
 
 
-@pytest.mark.parametrize("path", ["/static/main.js", "/static/sudoku_rules.js"])
+def test_index_has_accessible_timer_name_and_scoreboard(client):
+    html = client.get("/").get_data(as_text=True)
+
+    assert '<label for="player-name">Player name</label>' in html
+    assert 'id="player-name"' in html
+    assert 'maxlength="30"' in html
+    assert 'aria-describedby="player-name-hint"' in html
+    assert 'id="player-name-hint"' in html
+    assert '<time id="timer" role="timer" datetime="PT0S">00:00</time>' in html
+    assert '<span id="hints-used">0</span>' in html
+    assert '<section class="scoreboard" aria-labelledby="scoreboard-heading">' in html
+    assert '<h2 id="scoreboard-heading">Top 10</h2>' in html
+    assert 'role="region" aria-labelledby="scoreboard-caption" tabindex="0"' in html
+    assert '<caption id="scoreboard-caption">' in html
+    for column in ("Rank", "Player", "Time", "Difficulty", "Hints"):
+        assert f'<th scope="col">{column}</th>' in html
+    assert 'id="scoreboard-body"' in html
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/static/main.js",
+        "/static/sudoku_rules.js",
+        "/static/game_timer.js",
+        "/static/player_name.js",
+        "/static/scoreboard.js",
+    ],
+)
 def test_static_modules_are_served_as_javascript(client, path):
     response = client.get(path)
 
