@@ -2,6 +2,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/js/sudoku_rules.test.js tests/js/game_timer.test.js tests/js/player_name.test.js tests/js/scoreboard.test.js"
+    "test": "node --test tests/js/sudoku_rules.test.js tests/js/game_timer.test.js tests/js/player_name.test.js tests/js/scoreboard.test.js tests/js/theme.test.js"
   }
 }

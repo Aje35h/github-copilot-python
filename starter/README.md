@@ -58,6 +58,7 @@ These features run only in the browser; the server is unchanged.
 |---|---|
 | `sudoku.playerName.v1` | The trimmed player name as plain text (1–30 characters, no control characters). Removed when the field is cleared. `Anonymous` is used for an empty name but never stored here. |
 | `sudoku.scoreboard.v1` | `{"version":1,"scores":[...]}` with at most 10 scores |
+| `sudoku.theme.v1` | `light` or `dark` |
 
 Each score has exactly these fields: `name`, `seconds` (0–86,399), `difficulty`
 (`easy`, `medium`, or `hard`), `hintsUsed` (0–81), and `completedAt` (epoch
@@ -84,6 +85,30 @@ their table when the scoreboard changes.
 Scores live in the player's own browser and can be edited with developer
 tools; they are not tamper-proof.
 
+## Light and dark mode
+
+The "Dark mode" button switches the whole page between light and dark themes;
+its `aria-pressed` state shows whether dark mode is on. The choice is saved
+under `sudoku.theme.v1`. Only the exact values `light` and `dark` are accepted;
+any other stored value is ignored and the page uses light mode. The small
+`static/theme_boot.js` script runs in `<head>` and applies the saved theme
+before the page is drawn, so a dark page does not flash light on refresh.
+
+All colours are CSS custom properties defined once per theme in
+`static/styles.css`.
+
+### 3x3 region colours
+
+The nine 3x3 regions alternate between two background colours in a
+checkerboard (A B A / B A B / A B A). Every cell starts with region colour A;
+CSS `nth-child` selectors on the row and cell switch the top-middle,
+middle-left, middle-right, and bottom-middle regions to colour B. Prefilled
+cells add a light tint over the region colour, so the pattern stays visible.
+The thick borders between regions are unchanged.
+
+Conflicts use diagonal stripes and incorrect entries use an inset frame, both
+with error-coloured text, so neither state relies on colour alone.
+
 ## Running the tests
 
 Python tests (pytest):
@@ -95,7 +120,7 @@ python -m pytest -q
 JavaScript helper tests (Node.js 18 or newer, no npm packages needed):
 
 ```powershell
-node --test tests\js\sudoku_rules.test.js tests\js\game_timer.test.js tests\js\player_name.test.js tests\js\scoreboard.test.js
+node --test tests\js\sudoku_rules.test.js tests\js\game_timer.test.js tests\js\player_name.test.js tests\js\scoreboard.test.js tests\js\theme.test.js
 ```
 
 Node 22 does not accept the `tests\js\` folder here, so list each file.
@@ -131,3 +156,15 @@ frontend, check that:
     tab's table updates when the other records a score.
 16. At 320 px wide, the scoreboard can be scrolled sideways, including with
     the keyboard after focusing it.
+17. The Dark mode button switches the whole page, including the board,
+    controls, messages, and scoreboard, and its pressed state is announced.
+18. The chosen theme survives a refresh without a light flash; setting
+    `sudoku.theme.v1` to any other value shows light mode.
+19. The nine 3x3 regions alternate colours in both themes, including under
+    prefilled cells, and the thick region borders remain.
+20. Prefilled, hinted, editable, conflicting, and incorrect cells can be told
+    apart in both themes.
+21. At 320 px and at desktop width the whole board is visible and the page
+    does not scroll sideways.
+22. Keyboard focus is clearly visible in both themes, and cell states or
+    messages do not move the board.

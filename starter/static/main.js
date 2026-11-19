@@ -36,6 +36,7 @@ import {
   loadScores,
   recordScore,
 } from './scoreboard.js';
+import { loadTheme, nextTheme, resolveTheme, saveTheme } from './theme.js';
 
 const TIMER_REFRESH_MS = 250;
 const ALREADY_SOLVED_MESSAGE = 'This puzzle is already solved. Start a new game to play again.';
@@ -73,6 +74,7 @@ function selectElements() {
     timer: document.getElementById('timer'),
     hintsUsed: document.getElementById('hints-used'),
     scoreboardBody: document.getElementById('scoreboard-body'),
+    themeToggle: document.getElementById('theme-toggle'),
   };
 }
 
@@ -88,6 +90,23 @@ function getStorage() {
 function setStatus(text, tone = 'info') {
   elements.message.textContent = text;
   elements.message.dataset.tone = tone;
+}
+
+// ---- Theme ----
+
+let currentTheme = resolveTheme(null);
+
+function applyTheme(theme) {
+  currentTheme = theme;
+  document.documentElement.dataset.theme = theme;
+  elements.themeToggle.setAttribute('aria-pressed', String(theme === 'dark'));
+}
+
+function toggleTheme() {
+  const theme = nextTheme(currentTheme);
+  applyTheme(theme);
+  // If saving fails, the theme still applies for this visit.
+  saveTheme(getStorage(), theme);
 }
 
 // ---- Timer and hints display ----
@@ -503,6 +522,8 @@ async function performHint() {
 
 function init() {
   elements = selectElements();
+  applyTheme(resolveTheme(loadTheme(getStorage())));
+  elements.themeToggle.addEventListener('click', toggleTheme);
   elements.playerName.value = loadPlayerName(getStorage()) ?? '';
   elements.playerName.addEventListener('input', handlePlayerNameInput);
   elements.newGame.addEventListener('click', () => runExclusive(newGame));
